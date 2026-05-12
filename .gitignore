@@ -1,0 +1,18 @@
+# Docker volumes (container data)
+data/
+
+# Course materials
+project.pdf
+ucas-bdms-v1-2026.tar.gz.gz
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Conda
+tfrecord_env/
+
+# IDE
+.vscode/
+.idea/
