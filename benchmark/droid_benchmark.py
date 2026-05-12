@@ -22,7 +22,7 @@ INFLUXDB_BUCKET = "droid"
 IOTDB_HOST = "localhost"
 IOTDB_PORT = 6667
 
-DROID_PATH = "/mnt/huawei_nas/Datasets/DROID/1.0.0"
+DROID_PATH = os.environ.get("DROID_PATH", "/mnt/huawei_nas/Datasets/DROID/1.0.0")
 MAX_EPISODES = 20   # 轨迹数
 TF_SHARD_COUNT = 2   # 读取前 2 个 TFRecord 分片
 STEP_INTERVAL_MS = 50

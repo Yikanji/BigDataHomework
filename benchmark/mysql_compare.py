@@ -7,7 +7,9 @@ import numpy as np
 from tfrecord import tfrecord_loader
 import mysql.connector
 
-DROID_PATH = "/mnt/huawei_nas/Datasets/DROID/1.0.0"
+import os
+DROID_PATH = os.environ.get("DROID_PATH", "/mnt/huawei_nas/Datasets/DROID/1.0.0")
+DROID_PATH = os.environ.get("DROID_PATH", "/mnt/huawei_nas/Datasets/DROID/1.0.0")
 MAX_EPISODES = 60
 TF_SHARD_COUNT = 3
 STEP_INTERVAL_MS = 67
