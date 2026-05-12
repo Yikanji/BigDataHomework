@@ -1,97 +1,77 @@
 # 时序数据库系统调研：InfluxDB vs IoTDB
+## ——面向具身智能场景的胜任力分析与 MySQL 对照
 
 ---
 
 ## 1. 背景与目标
 
-时序数据库（Time Series Database, TSDB）是专门针对时间序列数据优化的数据库系统，广泛应用于物联网监控、金融分析、运维监控等领域。本次调研选取两个代表性的开源时序数据库——**InfluxDB** 和 **Apache IoTDB**，从系统架构、数据模型、存储引擎、查询语言、性能表现等方面进行深入对比分析。
+时序数据库是专门针对时间序列数据优化的数据库系统，广泛应用于 IT 运维监控、工业物联网等领域。然而，具身智能（Embodied AI）——机器人操控、VLA 模型训练、多模态感知与决策——产生的时序数据与经典监控场景有本质差异。
+
+本报告选取两个代表性开源时序数据库 **InfluxDB** 和 **Apache IoTDB**，从系统架构、数据模型、存储引擎等维度进行深入分析，并设计两阶段实验：
+
+1. **通用 benchmark**：合成数据下的读写吞吐和查询延迟
+2. **具身智能场景 benchmark**：使用 **DROID 数据集**（真实机器人操控轨迹）测试降采样、插值填充、滑动窗口异常检测、跨轨迹聚合四个场景，并引入 **MySQL** 作为关系数据库对照
+
+调研目标不仅是比较性能，更是**精准定位 TSDB 的设计假设与具身智能负载之间的契合点和失配点**，为"具身智能需要什么样的新一代数据系统"提供实证基础。
 
 ### 调研对象
 
 | 系统 | 开发者 | 版本 | 定位 |
 |------|--------|------|------|
-| InfluxDB | InfluxData | v2.7.12 | 通用时序数据库，监控/APM/实时分析 |
-| Apache IoTDB | Apache 软件基金会 | v1.3.2 | 面向物联网的时序数据库，工业/智能制造 |
+| InfluxDB | InfluxData | v2.7.12 | 通用时序数据库，IT 运维监控/实时分析 |
+| Apache IoTDB | Apache 基金会 | v1.3.2 | 工业物联网时序数据库，设备/传感器层级 |
+| MySQL | Oracle | 8.0 | 关系数据库，通用 OLTP 基准 |
 
 ---
 
 ## 2. 系统架构分析
 
-### 2.1 InfluxDB 架构
+### 2.1 InfluxDB
 
-InfluxDB v2 采用单体架构，内部由以下核心组件组成：
+**起源**：InfluxData 公司 2013 年始建，目标用户为 DevOps——存服务器指标、应用性能、网络监控。核心假设：数千台服务器持续上报数十种标量指标，tag 基数远小于数据行数，写多读少。
 
-- **TSM 存储引擎 (Time-Structured Merge Tree)**：一种针对时序数据优化的 LSM-tree 变体。写入先进入内存 WAL（Write-Ahead Log），再写入缓存的 Cache，达到阈值后合并压缩写入磁盘。与通用 LSM 不同，TSM 按时间范围 + Series Key 组织数据，使得时间范围扫描非常高效。
+**TSM 存储引擎 (Time-Structured Merge Tree)**：LSM-tree 的时序优化变体。写入先入 WAL → 内存 Cache → 达到阈值后合并压缩落盘。按时间范围 + Series Key 组织数据，时间范围扫描高效。
 
-- **倒排索引 (Inverted Index / TSI)**：从 tag 值到 series ID 的映射。InfluxDB 的数据模型是 `measurement + tag set → field values`，每个唯一的 measurement+tags 组合构成一个 series。倒排索引使得按 tag 过滤的查询能快速定位目标 series。
+**倒排索引 (TSI)**：tag 值到 series ID 的映射，低基数 tag 过滤是核心查询模式。
 
-- **分片 (Shard) 与过期策略**：数据按时间范围自动分片，每个 shard 覆盖一个固定时间窗口。过期数据可整片删除，IO 效率高。
+**查询语言**：Flux 函数式语言，支持管道式数据流处理和 push-down 下推。
 
-- **查询引擎**：使用 Flux 函数式查询语言，支持管道式数据流处理。编译器将 Flux 语句转换为执行计划，push-down 下推到存储层过滤，减少数据传输。
+### 2.2 Apache IoTDB
 
-**数据模型**：
+**起源**：清华软件学院研发，2018 年捐给 Apache。目标场景为电力电网、工厂设备、车联网——"非常多的设备，每个设备有一组固定传感器"。数据模型为树状路径：`root.工厂.产线.设备.传感器`。
 
-```
-measurement: temperature
-tags:        location=room_a, sensor_id=1
-field:       value=23.5
-timestamp:   2026-05-11T12:00:00Z
-```
+**分离式架构**：ConfigNode（元数据管理，Raft 一致性）+ DataNode（数据存储）。边-云协同是一等设计目标。
 
-### 2.2 IoTDB 架构
+**TsFile 列式存储**：自研文件格式，按设备+时间组织数据 Chunk。每个传感器单独存储为一个 Chunk，支持列式扫描。文件尾部含 BloomFilter + 时间范围索引。编码支持 Gorilla、RLE、TS_2DIFF，压缩支持 LZ4/Zstd。
 
-IoTDB v1.3 采用**分离式架构**，由 ConfigNode 和 DataNode 组成：
+**查询引擎**：类 SQL，原生支持降采样（`GROUP BY` 时间）、插值（`FILL(LINEAR)`）、路径通配（`root.**.sensor`）。
 
-- **ConfigNode（元数据节点）**：管理集群元数据，包括存储组注册、TimeSeries Schema、权限控制、负载均衡决策等。采用 Raft 协议保证一致性。
+### 2.3 MySQL（对照）
 
-- **DataNode（数据节点）**：负责实际数据存储和查询执行。每个 DataNode 独立管理本地的 TsFile 存储和 WAL。
-
-- **TsFile 列式存储格式**：IoTDB 自研的文件格式，具有以下特性：
-  - 按设备（Device）+ 时间组织数据 Chunk
-  - 每个传感器（Measurement）单独存储为一个 Chunk，支持列式扫描
-  - 支持多种编码方式（Gorilla、RLE、TS_2DIFF 等）和压缩算法
-  - 文件尾部包含索引信息（BloomFilter + 时间范围），加速过滤
-
-- **查询引擎**：支持类 SQL 语法，原生支持降采样（GROUP BY time）、插值（Fill）、路径通配（`root.**.s0`）等时序特有操作。
-
-**数据模型（树形路径）**：
-
-```
-root.region.factory.device.sensor
-└─ root (存储组)
-   └─ test_bench.d0.s0 (时间序列)
-```
+InnoDB 存储引擎，B+ 树索引，行式存储。无时序专用优化。用于展示"通用数据库实现 TSDB 操作"的额外开销。
 
 ---
 
 ## 3. 关键设计对比
 
-| 维度 | InfluxDB v2 | Apache IoTDB v1.3 |
-|------|-------------|-------------------|
-| **存储引擎** | TSM Tree (LSM变体) | TsFile 列式文件 + WAL |
-| **索引结构** | 倒排索引 (TSI) | BloomFilter + 时间范围索引 |
-| **数据模型** | Measurement + Tags (标签集) | 树形路径 (root.a.b.c) |
-| **查询语言** | Flux (函数式) | SQL-like |
-| **架构** | 单体（v2）/ 集群（v3） | 分离式（ConfigNode + DataNode） |
-| **压缩策略** | Snappy/GZIP/LZ4 | Gorilla/RLE/TS_2DIFF + Snappy/LZ4/Zstd |
-| **过期删除** | Shard 级别整片删除 | TTL 按时间清理 |
-| **写入链路** | WAL → Cache → TSM 压缩 | WAL → MemTable → TsFile Flush |
-| **查询下推** | Filter push-down | Predicate push-down + 索引过滤 |
-| **生态集成** | Telegraf, Grafana, Kapacitor | 与 Hadoop/Spark/Flink 集成 |
+| 维度 | InfluxDB v2 | IoTDB v1.3 | MySQL 8.0 |
+|------|-------------|------------|-----------|
+| **存储引擎** | TSM Tree (LSM 变体) | TsFile 列式文件 | InnoDB B+ 树行式 |
+| **索引结构** | 倒排索引 (TSI) | BloomFilter + 时间范围 | B+ 树主键+辅助索引 |
+| **数据模型** | Measurement + Tags | 树状路径 | 关系表 |
+| **时序原生能力** | 降采样、过期策略 | 降采样、FILL、TTL | 无（需手写 SQL） |
+| **写入优化** | WAL + Cache + 批量压缩 | WAL + MemTable + Flush | 索引维护 + redo log |
+| **分析查询** | 需遍历所有 series point | 列式跳过无关维度 | 全表扫描或索引覆盖 |
 
 **核心差异**：
 
-1. **数据模型哲学**：InfluxDB 的 tag/field 模型适合"多维度标签 + 少量数值"的监控场景；IoTDB 的树状路径模型天然映射工业设备层级（工厂→产线→设备→传感器）。
-
-2. **存储格式**：InfluxDB 的 TSM 偏向写优化及时间范围扫描；IoTDB 的 TsFile 列式格式在分析查询（跨设备聚合单传感器）上更有优势，因为相同传感器的数据在物理上相邻存储。
-
-3. **查询适用性**：InfluxDB 的 Flux 表达能力更强，适合流式数据处理；IoTDB 的 SQL 兼容性更好，易于与现有 BI 工具集成。
+1. **数据模型**：InfluxDB tag/field 模型适合多维度标签监控；IoTDB 树状路径天然映射设备层级。两种模型都不支持"episode"（有起止、有任务标签的离散操作片段）作为一等公民。
+2. **存储格式**：IoTDB 列式格式在聚合查询（跨设备求单一传感器均值）上占优；InfluxDB 行/列混合格式在时间范围扫描上高效。
+3. **查询语义**：两系统的算子是 SUM/AVG/PERCENTILE，缺乏 DTW 距离、轨迹形状匹配、滑动窗口标准差等具身场景需要的复杂时序操作（MySQL 同样缺乏）。
 
 ---
 
 ## 4. 部署与测试环境
-
-### 4.1 环境配置
 
 | 项目 | 规格 |
 |------|------|
@@ -101,7 +81,7 @@ root.region.factory.device.sensor
 | OS | Arch Linux |
 | Docker | v29.4.3 + Compose v5.1.3 |
 
-### 4.2 Docker Compose 部署
+### Docker Compose 部署
 
 ```yaml
 services:
@@ -110,116 +90,165 @@ services:
     ports: ["8086:8086"]
     volumes: [./data/influxdb:/var/lib/influxdb2]
     environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_ORG: test-org
       DOCKER_INFLUXDB_INIT_BUCKET: test-bucket
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dev-token-for-testing
 
   iotdb:
     image: apache/iotdb:1.3.2-standalone
-    ports: ["6667:6667", "18080:18080"]
+    ports: ["6667:6667"]
     volumes: [./data/iotdb:/iotdb/data]
+
+  mysql:
+    image: mysql:8.0
+    ports: ["3306:3306"]
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: droid
 ```
 
-启动命令：`docker compose up -d`
+### 测试工具
 
-### 4.3 测试工具
-
-使用自研 Python Benchmark 脚本，基于官方客户端库：
+自研 Python Benchmark 脚本，基于官方客户端库：
 - InfluxDB：`influxdb-client-python` (HTTP API)
 - IoTDB：`apache-iotdb` (RPC Session API)
+- MySQL：`mysql-connector-python`
+- 数据解析：`tfrecord`（DROID TFRecord 格式）
 
 ---
 
-## 5. 性能测试
+## 5. 实验一：通用合成数据 Benchmark
 
-### 5.1 测试方案
+### 5.1 方案
 
-**数据规模**：100 设备 × 10 传感器 × 1000 时间点 = **1,000,000 数据点**
+**数据规模**：100 设备 × 10 传感器 × 1000 点 = **1,000,000 数据点**
 
-**数据模型**：模拟温度传感器，值服从正态分布 N(25, 5)
+**数据模型**：模拟温度传感器，正态分布 N(25, 5)
 
-**测试维度**：
-
-| 测试项 | InfluxDB 查询 | IoTDB 查询 |
-|--------|--------------|-----------|
-| 写入吞吐 | 批量 write API | insert_records 批量 API |
-| 点查询 | `last()` 过滤器 | `last_value(*)` |
-| 范围查询 | `range(start: -1h)` | 时间范围 SELECT |
-| 聚合查询 | `group() + mean()` | `COUNT(*)` 跨设备 |
-| 多传感器查询 | `aggregateWindow(every: 1m)` | `AVG(s0~s4)` |
-| 磁盘占用 | `du -sh data/influxdb` | `du -sh data/iotdb` |
-
-### 5.2 测试结果
-
-#### 写入性能
+### 5.2 结果
 
 | 指标 | InfluxDB | IoTDB |
 |------|----------|-------|
-| 吞吐量 (pts/s) | **104,601** | 8,679 |
-| 总耗时 (s) | 9.56 | 115.22 |
+| 写入吞吐 (pts/s) | **104,601** | 8,679 |
+| 点查询 (ms) | 11.8 | 9.8 |
+| 范围查询 1h (ms) | 24.4 | **4.5** |
+| 全量聚合 (ms) | 39.8 | **7.1** |
+| 磁盘占用 (100万点) | **14 MB** | 73 MB |
 
-*注：IoTDB Python Session API 非批量写入最优路径，使用 Tablet API 或 CLI import 可获得更高吞吐。*
+### 5.3 分析
 
-#### 查询延迟
-
-| 查询类型 | InfluxDB (ms) | IoTDB (ms) | IoTDB 优势 |
-|----------|--------------|-----------|-----------|
-| 点查询 | 11.8 | 9.8 | 1.2x |
-| 范围查询 (1h) | 24.4 | **4.5** | 5.4x |
-| 全量聚合 | 39.8 | **7.1** | 5.6x |
-| 多传感器 AVG | 26.3 | **5.9** | 4.5x |
-
-#### 磁盘空间占用
-
-| 指标 | InfluxDB | IoTDB |
-|------|----------|-------|
-| 100 万点占用 | **14 MB** | 73 MB |
-| 每点平均 | ~14.7 bytes | ~76.5 bytes |
-
-### 5.3 结果分析
-
-1. **写入性能**：InfluxDB 的 TSM 引擎在写入路径上具有显著优势。其内存缓冲 + batch 压缩机制实现了 10 万+ pts/s 的吞吐。IoTDB 写入受限于 Python Session API 的单条写入方式，在生产环境中通过 Tablet API（列式批量写入）可将吞吐提升到相近水平。
-
-2. **查询性能**：IoTDB 在分析型查询上全面领先，主要得益于：
-   - **TsFile 列式存储**：查询单传感器（如 `AVG(s0)`）时，仅需读取对应列的数据块，而非整行
-   - **BloomFilter + 时间范围索引**：加速数据定位，跳过不相关文件
-   - **Chunk 级别统计信息**：在聚合查询时可直接使用预计算的最大/最小/计数等，避免完整扫描
-
-3. **存储效率**：InfluxDB 的压缩更激进（数据 + 索引合并存储），空间占用更低。IoTDB 由于列式存储和索引分离，原始存储开销更大，但 TsFile 支持多种编码（Gorilla 对浮点数据压缩率极高），实际生产数据压缩后差距会缩小。
+- **InfluxDB 写快 12×**：TSM 的 WAL → Cache → 批量压缩链路成熟，内存缓冲吸收写入峰值
+- **IoTDB 查快 5-6×**：TsFile 列式存储使聚合查询只需扫描目标列的 Chunk，Chunk 级预聚合统计信息可直接返回
+- **InfluxDB 省空间 5×**：数据与索引合并存储，IoTDB 列式+索引分离导致存储开销更大
 
 ---
 
-## 6. 总结与选型建议
+## 6. 实验二：DROID 真实机器人数据 Benchmark
 
-### 6.1 系统特点总结
+### 6.1 数据与测试方案
 
-**InfluxDB**：
-- 优势：写入吞吐高、部署简单、监控生态完善（Telegraf + Grafana + Kapacitor）、文档丰富
-- 劣势：查询性能在大跨度聚合场景下不及列式存储、Flux 学习曲线较陡、v2→v3 迁移不确定性
+**数据**：从 DROID 数据集（76k 条机器人操控轨迹）中加载 **60 条真实轨迹**，包含关节位置（7DOF）、关节速度（7DOF）、末端位姿（6DOF）、夹爪位置（1DOF）等 6 类时序字段，共 **377,559** 个数据点。DROID 控制频率 ~15Hz。
 
-**IoTDB**：
-- 优势：列式存储使分析查询极快、树状数据模型天然适合工业物联网层级、SQL 兼容降低使用门槛、与大数据生态（Hadoop/Spark）集成好
-- 劣势：部署复杂度较高（ConfigNode + DataNode 分离）、写入路径优化不如 InfluxDB 成熟、社区规模较小
+**四个场景测试**：
 
-### 6.2 选型建议
+| # | 场景 | 测试操作 | 现实对应 |
+|---|---|---|---|
+| 1 | **降采样** | 原始 15Hz → 1s 窗口均值 | 监控面板"过去 1 小时关节走势" |
+| 2 | **插值填充** | 删除 50 个点，用 FILL/LAG 补全 | 传感器丢帧后数据修复 |
+| 3 | **滑动窗口抖动检测** | 1s 窗口 STDDEV 检测关节速度突变 | 伺服抖动预警 |
+| 4 | **跨轨迹全局统计** | 60 条轨迹所有关节的 AVG + COUNT | 全量数据巡检 |
 
-| 场景 | 推荐 |
-|------|------|
-| IT 运维监控（服务器/容器/网络指标） | **InfluxDB** |
-| 工业物联网（设备传感器、智能制造） | **IoTDB** |
-| 高频金融数据分析 | **InfluxDB** |
-| 跨设备/跨区域的聚合分析 | **IoTDB** |
-| 对 SQL 生态依赖强的场景 | **IoTDB** |
-| 快速原型和简单部署 | **InfluxDB** |
+### 6.2 结果：三库对照
+
+| 场景 | InfluxDB | IoTDB | MySQL |
+|---|---|---|---|
+| 写入 (pts/s) | 89,605 | **121,191** | 9,560 |
+| 降采样 (ms) | 13.9 | **1.1** | 10.5 |
+| 插值填充 (ms) | 4.4* | **1.5** | 11.6† |
+| 滑动窗口 STDDEV (ms) | 59.9 | **2.1** | 6.4 |
+| 跨轨迹聚合 (ms) | 17.9 | **2.4** | **628.9** |
+| 磁盘占用 (38万点) | **12M** | 24M | — |
+
+> \* InfluxDB 无原生 FILL，需客户端插值；† MySQL 需 6 行 LAG/LEAD 窗口函数 SQL
+
+### 6.3 分析
+
+**场景 1 (降采样)**：IoTDB 的 TsFile Chunk 自带 min/max/sum/count 预计算，`GROUP BY(1s)` 直接取元数据，1.1ms 返回。InfluxDB 和 MySQL 分别需 13.9ms 和 10.5ms 展开原始点计算。
+
+**场景 2 (插值填充)**：IoTDB 一句 `FILL(LINEAR)` 服务端返回。InfluxDB 无对等功能，需在客户端拉数据→插值→理解。MySQL 需手写 `LAG() OVER + LEAD() OVER + CASE WHEN` 6 行 SQL 实现等价逻辑，数据量大时窗口函数性能指数级下降。
+
+**场景 3 (滑动窗口)**：IoTDB 列式存储只读 jvel 一列，`STDDEV() + GROUP BY(1s)` 2.1ms。MySQL 行存需扫描每行的全部列（关节×7 + 位姿×6 + 夹爪），IO 量多倍，6.4ms。InfluxDB 的 aggregateWindow 无预聚合标准差，需实时计算，59.9ms。
+
+**场景 4 (跨轨迹聚合)**：IoTDB 路径通配 `root.droid.*.jpos_d0` 在物理存储中就是连续的一段列，只读关节位置，2.4ms。MySQL 需**全表扫描 37 万行**做 `GROUP BY`，耗时 628.9ms——**IoTDB 快了 262 倍**。这是列式存储 vs 行式存储最极致的展示。
 
 ---
 
-## 7. 参考文献
+## 7. TSDB 在具身智能场景下的胜任力评估
+
+### 7.1 胜任区（TSDB 做得好的）
+
+1. **单传感器时间窗口聚合**（降采样、连续聚合）：TSDB 的核心设计假设，两个系统都表现优秀
+2. **平滑信号的压缩**：Gorilla/delta-of-delta 等压缩算法对缓变信号（关节匀速运动）压缩比可达 10-20×
+3. **按时间范围的点查询和范围查询**：时间索引成熟，延迟低
+
+### 7.2 失配区（TSDB 做不了或做不好的）
+
+1. **Episode 不是一等公民**
+   - 机器人数据以 episode（操作片段）为自然单位，有起止时间、任务标签、成功标志
+   - 两个 TSDB 都只有连续时间流概念，查"episode_5 的全部数据"需应用层维护额外元数据表
+
+2. **高维张量字段无原生支持**
+   - xHand 触觉是 16×16 阵列 @1kHz，G1 全身 23 关节 @500Hz——这些不是标量
+   - 存入 TSDB 只有三种烂方案：每维一列（宽表爆炸）、JSON（压缩失效）、BLOB（退化为文件存储）
+
+3. **多模态盲区**
+   - 图像、点云、语言指令与关节数据共存于同一 episode，TSDB 只能管标量
+   - 跨模态查询（"视觉相似且力曲线匹配"）无法在 TSDB 内完成
+
+4. **设计假设与具身数据不兼容**
+   - Tag 低基数假设：episode_id 百万级别，tag 索引膨胀
+   - 有序写入假设：多传感器异步采集、网络延迟导致乱序
+   - 压缩假设：接触瞬间力矩跳变、动作切换速度突变，Gorilla 压缩比骤降
+
+### 7.3 MySQL 对照的启示
+
+MySQL 在 4 个场景均未胜出——即使是它的主场（小范围精确查询、事务一致性），在时序分析负载上也无法和专用系统竞争。但 TSDB 同样不是正确答案。**具身智能需要的是介于专用 TSDB 和通用关系库之间的第三种方案。**
+
+---
+
+## 8. 讨论：具身智能需要什么样的数据系统
+
+### 8.1 设计原则
+
+基于实验发现的失配点，新一代具身智能数据系统应具备：
+
+1. **Episode 作为一等公民**：schema 层面支持 episode 起止时间、任务标签、成功标志、本体类型
+2. **多模态联合存储**：RGB/深度/点云走对象存储+引用指针，标量/低维信号走列式压缩，元数据走关系表，三者在同一 episode 标识下对齐
+3. **张量时序原生支持**：为高维同构传感器（触觉阵列、关节组）设计块的列式存储，利用空间相关性压缩
+4. **跨存储引擎的查询优化器**：一个查询同时涉及时序聚合 + 向量相似检索 + 元数据过滤时，查询计划能自动拆解、调度、合并结果
+
+### 8.2 架构方向：具身数据 Lakehouse
+
+推荐基于现代数据湖仓一体（Lakehouse）架构构建——底层统一存储 Parquet/Lance 列式文件在对象存储上，上层挂载多个专用引擎（DuckDB 列式分析、LanceDB 向量检索、自研 Pons 层做实时 context 编码），不同引擎操作同一份文件。这避免了"InfluxDB + MySQL + Milvus 三系统胶水黏合"带来的跨引擎 JOIN 延迟、数据一致性和运维复杂度问题。
+
+---
+
+## 9. 总结
+
+本报告通过对 InfluxDB 和 IoTDB 的系统架构分析和两阶段性能测试，得出以下结论：
+
+1. **TSDB 的核心能力（降采样、连续聚合、平滑压缩）在具身场景下依然有效**——单传感器时序查询是它们的主场。
+2. **TSDB 的设计假设与具身数据之间存在着不可调和的 gap**：episode 概念缺失、张量字段无解、多模态无法处理、cardinality 与排序假设不成立。
+3. **MySQL 对照实验表明**，通用关系库在时序分析负载上的性能差距为数倍至数百倍，但 TSDB 同样不是终极答案——需要第三种方案。
+4. **基于 Lakehouse 架构的中间件/数据工具集**，而非全新数据库系统，是目前最务实的落地路径。这也为后续的研究工作（Cross-Embodiment Memory、Retrieval-Augmented VLA）奠定了数据基础设施。
+
+---
+
+## 参考文献
 
 1. InfluxDB Documentation. https://docs.influxdata.com/influxdb/v2/
 2. Apache IoTDB Documentation. https://iotdb.apache.org/UserGuide/latest/
-3. InfluxDB TSM Engine Design. https://docs.influxdata.com/influxdb/v2/reference/internals/storage-engine/
-4. IoTDB TsFile Format. https://iotdb.apache.org/UserGuide/latest/StorageEngine/TsFile.html
-5. Wang, C. et al. "Apache IoTDB: Time-series database for IoT applications." *Proceedings of the ACM SIGMOD*, 2020.
+3. Wang, C. et al. "Apache IoTDB: Time-series database for IoT applications." *SIGMOD*, 2020.
+4. Khazatsky, A. et al. "DROID: A Large-Scale In-The-Wild Robot Manipulation Dataset." *RSS*, 2024.
+5. Armbrust, M. et al. "Lakehouse: A New Generation of Open Platforms that Unify Data Warehousing and Advanced Analytics." *CIDR*, 2021.
 6. Time Series Benchmark Suite (TSBS). https://github.com/timescale/tsbs
