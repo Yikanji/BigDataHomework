@@ -1,0 +1,27 @@
+{
+  "benchmark": "TSBS Influx line protocol equivalent for InfluxDB3",
+  "database": "InfluxDB 3.9.3 Core",
+  "db": "tsbs_influx3_bench",
+  "data_file": "var/benchmarks/tsbs/influx-cpu-scale100-1h.data",
+  "line_count": 36000,
+  "metric_count": 360000,
+  "load_elapsed_s": 7.969409942626953,
+  "load_metric_rate": 45172.7295485735,
+  "load_row_rate": 4517.27295485735,
+  "visible_rows": 36000,
+  "query": "select hostname, max(time) as last_time from cpu group by hostname",
+  "query_count": 100,
+  "query_workers": 4,
+  "query_wall_s": 0.4197874069213867,
+  "query_rate_qps": 238.2158167472778,
+  "latency_ms": {
+    "min": 11.999845504760742,
+    "median": 15.604734420776367,
+    "mean": 16.379265785217285,
+    "max": 31.827211380004883,
+    "p95": 23.441076278686523,
+    "p99": 28.92279624938965
+  },
+  "query_result_rows_min": 100,
+  "query_result_rows_max": 100
+}

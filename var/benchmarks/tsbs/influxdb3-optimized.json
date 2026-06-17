@@ -1,0 +1,32 @@
+{
+  "benchmark": "TSBS generated data with InfluxDB3 v3 API adapter",
+  "database": "InfluxDB 3 Core",
+  "db": "tsbs_influx3_bench_opt",
+  "file": "var/benchmarks/tsbs/influx-cpu-scale100-1h.data",
+  "batch_size": 15000,
+  "workers": 1,
+  "line_count": 36000,
+  "metric_count": 360000,
+  "load_elapsed_s": 2.2482516765594482,
+  "load_metric_rate": 160124.42190231849,
+  "load_row_rate": 16012.44219023185,
+  "count_query": [
+    {
+      "rows": 36000
+    }
+  ],
+  "query_count": 100,
+  "query_workers": 4,
+  "query_wall_s": 0.6540570259094238,
+  "query_rate_qps": 152.89186728168923,
+  "latency_ms": {
+    "min": 18.76521110534668,
+    "median": 25.662541389465332,
+    "mean": 25.546178817749023,
+    "max": 37.729740142822266,
+    "p95": 34.16109085083008,
+    "p99": 37.431955337524414
+  },
+  "query_result_rows_min": 100,
+  "query_result_rows_max": 100
+}

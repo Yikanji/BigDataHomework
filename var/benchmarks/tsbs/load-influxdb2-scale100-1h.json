@@ -1,0 +1,27 @@
+{
+ "ResultFormatVersion": "0.1",
+ "RunnerConfig": {
+  "db-name": "tsbs_influx2_bench",
+  "batch-size": 5000,
+  "workers": 4,
+  "limit": 0,
+  "do-load": true,
+  "do-create-db": false,
+  "do-abort-on-exist": false,
+  "reporting-period": 10000000000,
+  "hash-workers": false,
+  "no-flow-control": false,
+  "channel-capacity": 0,
+  "insert-intervals": "",
+  "results-file": "var/benchmarks/tsbs/load-influxdb2-scale100-1h.json",
+  "file": "var/benchmarks/tsbs/influx-cpu-scale100-1h.data",
+  "seed": 0
+ },
+ "StartTime": 1781637269,
+ "EndTime": 1781637269,
+ "DurationMillis": 231,
+ "Totals": {
+  "metricRate": 1555221.1599658492,
+  "rowRate": 155522.11599658494
+ }
+}

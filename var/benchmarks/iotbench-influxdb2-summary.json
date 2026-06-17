@@ -1,0 +1,23 @@
+{
+  "benchmark": "IoTDB Bench official",
+  "database": "InfluxDB 2.9.1",
+  "log": "var/benchmarks/iotbench-influxdb2.log",
+  "ok_operations": 1000,
+  "ok_points": 50000,
+  "fail_operations": 0,
+  "fail_points": 0,
+  "throughput_points_s": 16756.07,
+  "latency_ms": {
+    "avg": 1.92,
+    "min": 0.78,
+    "p10": 0.94,
+    "p25": 1.03,
+    "median": 1.12,
+    "p75": 1.24,
+    "p90": 1.4,
+    "p95": 1.96,
+    "p99": 5.31,
+    "p999": 15.61,
+    "max": 562.68
+  }
+}

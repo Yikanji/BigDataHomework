@@ -1,0 +1,10 @@
+time,per. metric/s,metric total,overall metric/s,per. row/s,row total,overall row/s
+[worker 2] backoffs took a total of 0.000000sec of runtime
+[worker 3] backoffs took a total of 0.000000sec of runtime
+[worker 1] backoffs took a total of 0.000000sec of runtime
+[worker 0] backoffs took a total of 0.000000sec of runtime
+
+Summary:
+loaded 360000 metrics in 0.231sec with 4 workers (mean rate 1555221.16 metrics/sec)
+loaded 36000 rows in 0.231sec with 4 workers (mean rate 155522.12 rows/sec)
+Saving results json file to var/benchmarks/tsbs/load-influxdb2-scale100-1h.json

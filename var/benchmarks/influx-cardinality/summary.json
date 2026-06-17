@@ -1,0 +1,200 @@
+[
+  {
+    "target": "influxdb2",
+    "database": "InfluxDB 2.9.1",
+    "series": 1000,
+    "points_per_series": 5,
+    "total_points": 5000,
+    "batch_size": 10000,
+    "load_elapsed_s": 0.1098024845123291,
+    "load_points_s": 45536.31024112736,
+    "single_last": {
+      "repeats": 3,
+      "rows_min": 1,
+      "rows_max": 1,
+      "latency_ms": {
+        "median": 3.3025741577148438,
+        "mean": 3.8022994995117188,
+        "p95": 5.418062210083008,
+        "max": 5.418062210083008
+      }
+    },
+    "all_series_last": {
+      "repeats": 3,
+      "rows_min": 1000,
+      "rows_max": 1000,
+      "latency_ms": {
+        "median": 19.678354263305664,
+        "mean": 21.01421356201172,
+        "p95": 24.056196212768555,
+        "max": 24.056196212768555
+      }
+    }
+  },
+  {
+    "target": "influxdb2",
+    "database": "InfluxDB 2.9.1",
+    "series": 10000,
+    "points_per_series": 5,
+    "total_points": 50000,
+    "batch_size": 10000,
+    "load_elapsed_s": 0.28601503372192383,
+    "load_points_s": 174815.98554225705,
+    "single_last": {
+      "repeats": 3,
+      "rows_min": 1,
+      "rows_max": 1,
+      "latency_ms": {
+        "median": 4.3010711669921875,
+        "mean": 4.471063613891602,
+        "p95": 5.165338516235352,
+        "max": 5.165338516235352
+      }
+    },
+    "all_series_last": {
+      "repeats": 3,
+      "rows_min": 10000,
+      "rows_max": 10000,
+      "latency_ms": {
+        "median": 189.3002986907959,
+        "mean": 192.49598185221353,
+        "p95": 204.6654224395752,
+        "max": 204.6654224395752
+      }
+    }
+  },
+  {
+    "target": "influxdb2",
+    "database": "InfluxDB 2.9.1",
+    "series": 50000,
+    "points_per_series": 5,
+    "total_points": 250000,
+    "batch_size": 10000,
+    "load_elapsed_s": 1.4165244102478027,
+    "load_points_s": 176488.31053766713,
+    "single_last": {
+      "repeats": 3,
+      "rows_min": 1,
+      "rows_max": 1,
+      "latency_ms": {
+        "median": 3.44085693359375,
+        "mean": 3.405888875325521,
+        "p95": 4.268407821655273,
+        "max": 4.268407821655273
+      }
+    },
+    "all_series_last": {
+      "repeats": 3,
+      "rows_min": 50000,
+      "rows_max": 50000,
+      "latency_ms": {
+        "median": 879.8317909240723,
+        "mean": 867.2370910644531,
+        "p95": 883.7788105010986,
+        "max": 883.7788105010986
+      }
+    }
+  },
+  {
+    "target": "influxdb3",
+    "database": "InfluxDB 3.9.3 Core",
+    "db": "smoke",
+    "table": "cardinality_s1000_p5_1781668460",
+    "series": 1000,
+    "points_per_series": 5,
+    "total_points": 5000,
+    "batch_size": 10000,
+    "load_elapsed_s": 0.2966759204864502,
+    "load_points_s": 16853.406881831383,
+    "single_last": {
+      "repeats": 3,
+      "rows_min": 1,
+      "rows_max": 1,
+      "latency_ms": {
+        "median": 8.301734924316406,
+        "mean": 8.120218912760416,
+        "p95": 9.02414321899414,
+        "max": 9.02414321899414
+      }
+    },
+    "all_series_last": {
+      "repeats": 3,
+      "rows_min": 1000,
+      "rows_max": 1000,
+      "latency_ms": {
+        "median": 14.832496643066406,
+        "mean": 16.800880432128906,
+        "p95": 21.253585815429688,
+        "max": 21.253585815429688
+      }
+    }
+  },
+  {
+    "target": "influxdb3",
+    "database": "InfluxDB 3.9.3 Core",
+    "db": "smoke",
+    "table": "cardinality_s10000_p5_1781668460",
+    "series": 10000,
+    "points_per_series": 5,
+    "total_points": 50000,
+    "batch_size": 10000,
+    "load_elapsed_s": 4.92540717124939,
+    "load_points_s": 10151.444999686571,
+    "single_last": {
+      "repeats": 3,
+      "rows_min": 1,
+      "rows_max": 1,
+      "latency_ms": {
+        "median": 3.183603286743164,
+        "mean": 4.130045572916667,
+        "p95": 6.302118301391602,
+        "max": 6.302118301391602
+      }
+    },
+    "all_series_last": {
+      "repeats": 3,
+      "rows_min": 10000,
+      "rows_max": 10000,
+      "latency_ms": {
+        "median": 21.431446075439453,
+        "mean": 21.954854329427082,
+        "p95": 24.010419845581055,
+        "max": 24.010419845581055
+      }
+    }
+  },
+  {
+    "target": "influxdb3",
+    "database": "InfluxDB 3.9.3 Core",
+    "db": "smoke",
+    "table": "cardinality_s50000_p5_1781668465",
+    "series": 50000,
+    "points_per_series": 5,
+    "total_points": 250000,
+    "batch_size": 10000,
+    "load_elapsed_s": 24.918002367019653,
+    "load_points_s": 10032.906984987238,
+    "single_last": {
+      "repeats": 3,
+      "rows_min": 1,
+      "rows_max": 1,
+      "latency_ms": {
+        "median": 8.346796035766602,
+        "mean": 8.051872253417969,
+        "p95": 10.108709335327148,
+        "max": 10.108709335327148
+      }
+    },
+    "all_series_last": {
+      "repeats": 3,
+      "rows_min": 50000,
+      "rows_max": 50000,
+      "latency_ms": {
+        "median": 96.10152244567871,
+        "mean": 90.48342704772949,
+        "p95": 97.86033630371094,
+        "max": 97.86033630371094
+      }
+    }
+  }
+]

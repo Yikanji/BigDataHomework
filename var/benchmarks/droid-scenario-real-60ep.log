@@ -1,0 +1,62 @@
+Script started on 2026-06-17 08:26:46+08:00 [COMMAND="env NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 DROID_PATH=var/droid/1.0.0 DROID_MAX_EPISODES=60 DROID_TF_SHARD_COUNT=1 BENCH_TARGETS=all BENCH_BATCH_SIZE=10000 /home/yikanji/miniconda3/envs/tfrecord_env/bin/python benchmark/droid_scenario.py" <not executed on terminal>]
+========================================================================================
+  DROID 场景化 Benchmark
+  轨迹: ≤60 条, 分片: 1, ~15Hz
+  目标库: InfluxDB 3, IoTDB, PostgreSQL, DolphinDB
+========================================================================================
+
+[准备] 加载 DROID...
+  40 条轨迹, 12783 步, 268,443 数据点
+
+[写入] InfluxDB 3...
+  268,443 点, 45,326 pts/s, 耗时 5.9s
+
+[写入] IoTDB...
+  268,443 点, 93,592 pts/s, 耗时 2.9s
+
+[写入] PostgreSQL...
+  268,443 行, 95,827 rows/s, 耗时 2.8s
+
+[写入] DolphinDB...
+  268,443 行, 385,505 rows/s, 耗时 0.7s
+
+[场景] 场景测试
+
+-------------------------
+
+[场景1] 降采样: 原始 -> 1s 窗口均值 (ep0, jpos_d0)
+  InfluxDB 3 8.2 ms | IoTDB 3.9 ms | PostgreSQL 1.1 ms | DolphinDB 1.0 ms
+
+[场景2] 插值: 删除 ep0/jpos_d0 中间 50 点后线性补全
+  InfluxDB 3 17.7 ms | IoTDB 3.1 ms | PostgreSQL 4.0 ms | DolphinDB 1.2 ms
+
+[场景3] 滑动窗口: 1s 窗口 STDDEV 检测关节抖动 (ep0, jvel_d0)
+  InfluxDB 3 5.6 ms | IoTDB 3.6 ms | PostgreSQL 0.5 ms | DolphinDB 0.9 ms
+
+[场景4] 跨轨迹聚合: 40 条轨迹关节位置全局 AVG + STDDEV
+  InfluxDB 3 4.8 ms | IoTDB 3.5 ms | PostgreSQL 9.4 ms | DolphinDB 3.6 ms
+
+[磁盘] 磁盘占用
+  InfluxDB 3: 27M
+  IoTDB: 18M
+  PostgreSQL: 205M
+  DolphinDB: 440.2M
+
+[汇总]
+
+========================================================================================
+  四库对照结果
+========================================================================================
+
+场景                                  InfluxDB 3         IoTDB    PostgreSQL     DolphinDB
+----------------------------------------------------------------------------------------
+写入吞吐 (pts/s)                           45326.0       93592.2       95826.8      385505.5
+降采样 (ms)                                   8.2           3.9           1.1           1.0
+插值填充 (ms)                                 17.7           3.1           4.0           1.2
+滑动窗口抖动检测 (ms)                              5.6           3.6           0.5           0.9
+跨轨迹聚合 (ms)                                 4.8           3.5           9.4           3.6
+磁盘占用                                       27M           18M          205M        440.2M
+
+✅ 完成
+
+Script done on 2026-06-17 08:27:02+08:00 [COMMAND_EXIT_CODE="0"]

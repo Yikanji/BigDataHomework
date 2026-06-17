@@ -1,0 +1,16 @@
+{
+  "benchmark": "IoTDB Bench equivalent for InfluxDB3",
+  "database": "InfluxDB 3.9.3 Core",
+  "db": "iotbench_influx3_equiv",
+  "line_count": 10000,
+  "point_count": 50000,
+  "elapsed_s": 4.026173830032349,
+  "throughput_points_s": 12418.738512241105,
+  "throughput_lines_s": 2483.747702448221,
+  "count_query_ms": 6.775617599487305,
+  "count_result": [
+    {
+      "rows": 10000
+    }
+  ]
+}

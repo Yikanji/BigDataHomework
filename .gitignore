@@ -1,6 +1,12 @@
 # Docker volumes (container data)
 data/
 
+# Local benchmark toolchains and large generated artifacts
+tools/
+var/*
+!var/benchmarks/
+!var/benchmarks/**
+
 # Course materials
 project.pdf
 ucas-bdms-v1-2026.tar.gz.gz

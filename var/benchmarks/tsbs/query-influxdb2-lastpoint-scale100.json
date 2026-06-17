@@ -1,0 +1,48 @@
+{
+ "ResultFormatVersion": "0.1",
+ "RunnerConfig": {
+  "DBName": "tsbs_influx2_bench",
+  "Limit": 100,
+  "LimitRPS": 0,
+  "MemProfile": "",
+  "HDRLatenciesFile": "",
+  "Workers": 4,
+  "PrintResponses": false,
+  "Debug": 0,
+  "FileName": "var/benchmarks/tsbs/influx-cpu-scale100-lastpoint.queries",
+  "BurnIn": 0,
+  "PrintInterval": 100,
+  "PrewarmQueries": false,
+  "ResultsFile": "var/benchmarks/tsbs/query-influxdb2-lastpoint-scale100.json"
+ },
+ "StartTime": 1781637269000,
+ "EndTime": 1781637269000,
+ "DurationMillis": 314,
+ "Totals": {
+  "burnIn": 0,
+  "limit": 100,
+  "overallQuantiles": {
+   "Influx_last_row_per_host": {
+    "q0": 0,
+    "q100": 20.942,
+    "q50": 12.195,
+    "q95": 18.082,
+    "q99": 20.636,
+    "q999": 20.942
+   },
+   "all_queries": {
+    "q0": 0,
+    "q100": 20.942,
+    "q50": 12.195,
+    "q95": 18.082,
+    "q99": 20.636,
+    "q999": 20.942
+   }
+  },
+  "overallQueryRates": {
+   "Influx_last_row_per_host": 318.68636359151577,
+   "all_queries": 318.68636359151577
+  },
+  "prewarmQueries": false
+ }
+}

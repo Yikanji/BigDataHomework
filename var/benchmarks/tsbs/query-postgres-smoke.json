@@ -1,0 +1,48 @@
+{
+ "ResultFormatVersion": "0.1",
+ "RunnerConfig": {
+  "DBName": "tsbs_smoke",
+  "Limit": 5,
+  "LimitRPS": 0,
+  "MemProfile": "",
+  "HDRLatenciesFile": "",
+  "Workers": 1,
+  "PrintResponses": false,
+  "Debug": 0,
+  "FileName": "var/benchmarks/tsbs/timescaledb-cpu-smoke.queries",
+  "BurnIn": 0,
+  "PrintInterval": 100,
+  "PrewarmQueries": false,
+  "ResultsFile": "var/benchmarks/tsbs/query-postgres-smoke.json"
+ },
+ "StartTime": 1781636873000,
+ "EndTime": 1781636873000,
+ "DurationMillis": 11,
+ "Totals": {
+  "burnIn": 0,
+  "limit": 5,
+  "overallQuantiles": {
+   "TimescaleDB_last_row_per_host": {
+    "q0": 0,
+    "q100": 8.169,
+    "q50": 0.294,
+    "q95": 8.169,
+    "q99": 8.169,
+    "q999": 8.169
+   },
+   "all_queries": {
+    "q0": 0,
+    "q100": 8.169,
+    "q50": 0.294,
+    "q95": 8.169,
+    "q99": 8.169,
+    "q999": 8.169
+   }
+  },
+  "overallQueryRates": {
+   "TimescaleDB_last_row_per_host": 484.39511450712996,
+   "all_queries": 484.39511450712996
+  },
+  "prewarmQueries": false
+ }
+}

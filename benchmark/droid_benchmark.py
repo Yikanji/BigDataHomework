@@ -6,18 +6,13 @@ import subprocess
 import os
 import sys
 import glob
-import requests
 import numpy as np
 from tfrecord import tfrecord_loader
-from influxdb_client import InfluxDBClient, WriteOptions, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
 from iotdb.Session import Session as IoTDBSession
+from influxdb3_client import InfluxDB3Client, line_protocol
 
 # ============ Config ============
-INFLUXDB_URL = "http://localhost:8086"
-INFLUXDB_TOKEN = "dev-token-for-testing"
-INFLUXDB_ORG = "test-org"
-INFLUXDB_BUCKET = "droid"
+INFLUXDB_DB = "droid"
 
 IOTDB_HOST = "localhost"
 IOTDB_PORT = 6667
@@ -77,72 +72,83 @@ def _parse_episode(record: dict) -> dict:
 
 # ============ InfluxDB ============
 def influxdb_setup():
-    # 创建 bucket
-    resp = requests.get(f"{INFLUXDB_URL}/api/v2/buckets?name={INFLUXDB_BUCKET}",
-                        headers={"Authorization": f"Token {INFLUXDB_TOKEN}"})
-    if resp.status_code == 200 and len(resp.json().get("buckets", [])) == 0:
-        org_resp = requests.get(f"{INFLUXDB_URL}/api/v2/orgs",
-                                headers={"Authorization": f"Token {INFLUXDB_TOKEN}"})
-        orgs = org_resp.json().get("orgs", [])
-        if orgs:
-            requests.post(f"{INFLUXDB_URL}/api/v2/buckets",
-                          headers={"Authorization": f"Token {INFLUXDB_TOKEN}", "Content-Type": "application/json"},
-                          json={"name": INFLUXDB_BUCKET, "orgID": orgs[0]["id"], "retentionRules": []})
-    return InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
+    client = InfluxDB3Client(INFLUXDB_DB)
+    client.recreate_database()
+    return client
 
 def influxdb_write_test(episodes: list) -> dict:
     client = influxdb_setup()
-    write_api = client.write_api(write_options=WriteOptions(batch_size=5000))
-    
+
     base_time = int(time.time() * 1000)
-    total_points = 0
+
+    def rows():
+        for ep_idx, ep in enumerate(episodes):
+            for field_name, _, dims in TIME_SERIES_FIELDS:
+                arr = ep["data"].get(field_name)
+                if arr is None:
+                    continue
+                num_steps = arr.shape[0]
+                for step in range(num_steps):
+                    ts = base_time - (num_steps - step) * STEP_INTERVAL_MS
+                    for dim in range(dims):
+                        yield line_protocol(
+                            field_name,
+                            {"episode_id": str(ep_idx), "dim": str(dim)},
+                            {"value": float(arr[step, dim])},
+                            ts,
+                        )
+
+    total_points = sum(ep["point_count"] for ep in episodes)
     start = time.time()
-
-    for ep_idx, ep in enumerate(episodes):
-        for field_name, _, dims in TIME_SERIES_FIELDS:
-            arr = ep["data"].get(field_name)
-            if arr is None:
-                continue
-            num_steps = arr.shape[0]
-            for step in range(num_steps):
-                ts = base_time - (num_steps - step) * STEP_INTERVAL_MS
-                for dim in range(dims):
-                    p = (Point(field_name)
-                         .tag("episode_id", str(ep_idx))
-                         .tag("dim", str(dim))
-                         .field("value", float(arr[step, dim]))
-                         .time(ts, write_precision="ms"))
-                    write_api.write(bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, record=p)
-                    total_points += 1
-
-    write_api.close()
+    client.write_lines(rows())
     elapsed = time.time() - start
     throughput = total_points / elapsed if elapsed > 0 else 0
-    client.close()
-    return {"db": "InfluxDB", "total_points": total_points, "elapsed_s": round(elapsed, 2), "throughput_ps": round(throughput)}
+    return {"db": "InfluxDB 3", "total_points": total_points, "elapsed_s": round(elapsed, 2), "throughput_ps": round(throughput)}
 
 def influxdb_query_tests(episodes: list) -> dict:
-    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
-    query_api = client.query_api()
+    client = InfluxDB3Client(INFLUXDB_DB)
     results = {}
 
     # Q1: 点查询 - 单关节最新位置
-    q1 = f'from(bucket:"{INFLUXDB_BUCKET}") |> range(start: -10m) |> filter(fn: (r) => r._measurement == "obs_joint_position" and r.episode_id == "0" and r.dim == "0") |> last()'
-    t0 = time.time(); query_api.query(q1, org=INFLUXDB_ORG); results["point_query_ms"] = round((time.time()-t0)*1000, 1)
+    q1 = """
+    SELECT time, value
+    FROM obs_joint_position
+    WHERE episode_id = '0' AND dim = '0'
+    ORDER BY time DESC
+    LIMIT 1
+    """
+    t0 = time.time(); client.query_sql(q1); results["point_query_ms"] = round((time.time()-t0)*1000, 1)
 
     # Q2: 范围查询 - 单关节全轨迹
-    q2 = f'from(bucket:"{INFLUXDB_BUCKET}") |> range(start: -30m) |> filter(fn: (r) => r._measurement == "obs_joint_position" and r.episode_id == "0" and r.dim == "0")'
-    t0 = time.time(); query_api.query(q2, org=INFLUXDB_ORG); results["range_query_ms"] = round((time.time()-t0)*1000, 1)
+    q2 = """
+    SELECT time, value
+    FROM obs_joint_position
+    WHERE episode_id = '0'
+      AND dim = '0'
+      AND time >= now() - INTERVAL '30 minutes'
+    ORDER BY time
+    """
+    t0 = time.time(); client.query_sql(q2); results["range_query_ms"] = round((time.time()-t0)*1000, 1)
 
     # Q3: 单轨迹所有关节均值
-    q3 = f'from(bucket:"{INFLUXDB_BUCKET}") |> range(start: -30m) |> filter(fn: (r) => r._measurement == "obs_joint_position" and r.episode_id == "0") |> group(columns: ["dim"]) |> mean()'
-    t0 = time.time(); query_api.query(q3, org=INFLUXDB_ORG); results["aggregate_ms"] = round((time.time()-t0)*1000, 1)
+    q3 = """
+    SELECT dim, AVG(value) AS mean_value
+    FROM obs_joint_position
+    WHERE episode_id = '0'
+      AND time >= now() - INTERVAL '30 minutes'
+    GROUP BY dim
+    ORDER BY dim
+    """
+    t0 = time.time(); client.query_sql(q3); results["aggregate_ms"] = round((time.time()-t0)*1000, 1)
 
     # Q4: 跨轨迹关节速度全局统计
-    q4 = f'from(bucket:"{INFLUXDB_BUCKET}") |> range(start: -30m) |> filter(fn: (r) => r._measurement == "act_joint_velocity") |> group() |> mean()'
-    t0 = time.time(); query_api.query(q4, org=INFLUXDB_ORG); results["cross_episode_ms"] = round((time.time()-t0)*1000, 1)
+    q4 = """
+    SELECT AVG(value) AS mean_value, COUNT(value) AS cnt
+    FROM act_joint_velocity
+    WHERE time >= now() - INTERVAL '30 minutes'
+    """
+    t0 = time.time(); client.query_sql(q4); results["cross_episode_ms"] = round((time.time()-t0)*1000, 1)
 
-    client.close()
     return results
 
 
@@ -255,9 +261,9 @@ def main():
         print("ERROR: 未加载到数据")
         sys.exit(1)
 
-    print("\n[2/5] InfluxDB 写入测试...")
+    print("\n[2/5] InfluxDB 3 写入测试...")
     influx_result = influxdb_write_test(episodes)
-    print(f"  InfluxDB: {influx_result['throughput_ps']:,} points/s, "
+    print(f"  InfluxDB 3: {influx_result['throughput_ps']:,} points/s, "
           f"共 {influx_result['total_points']:,} 点, 耗时 {influx_result['elapsed_s']}s")
 
     print("\n[3/5] IoTDB 写入测试...")
@@ -270,9 +276,9 @@ def main():
     iotdb_queries = iotdb_query_tests()
 
     print("\n[5/5] 磁盘空间占用...")
-    influxdb_disk = get_disk_usage(os.path.join(DATA_DIR, "influxdb"))
-    iotdb_disk = get_disk_usage(os.path.join(DATA_DIR, "iotdb"))
-    print(f"  InfluxDB: {influxdb_disk}")
+    influxdb_disk = get_disk_usage(os.path.join(DATA_DIR, "influxdb3"))
+    iotdb_disk = get_disk_usage(os.path.join(DATA_DIR, "iotdb2"))
+    print(f"  InfluxDB 3: {influxdb_disk}")
     print(f"  IoTDB:    {iotdb_disk}")
 
     # 轨迹样本
@@ -285,7 +291,7 @@ def main():
     print("\n" + "=" * 65)
     print("  测试结果汇总")
     print("=" * 65)
-    print(f"\n{'指标':<30} {'InfluxDB':>15} {'IoTDB':>15}")
+    print(f"\n{'指标':<30} {'InfluxDB 3':>15} {'IoTDB':>15}")
     print("-" * 60)
     print(f"{'写入吞吐 (points/s)':<30} {influx_result['throughput_ps']:>15,} {iotdb_result['throughput_ps']:>15,}")
     print(f"{'写入总耗时 (s)':<30} {influx_result['elapsed_s']:>15.1f} {iotdb_result['elapsed_s']:>15.1f}")

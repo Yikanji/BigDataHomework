@@ -1,0 +1,11 @@
+{
+  "benchmark": "TSBS Influx line protocol equivalent for InfluxDB3",
+  "database": "InfluxDB 3.9.3 Core",
+  "db": "tsbs_influx3_bench",
+  "line_count": 36000,
+  "metric_count": 360000,
+  "load_elapsed_s": 7.969409942626953,
+  "load_metric_rate": 45172.7295485735,
+  "load_row_rate": 4517.27295485735,
+  "visible_rows": 36000
+}

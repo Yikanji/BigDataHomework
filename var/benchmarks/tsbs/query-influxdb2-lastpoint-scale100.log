@@ -1,0 +1,7 @@
+Run complete after 100 queries with 4 workers (Overall query rate 321.57 queries/sec):
+Influx last row per host:
+min:     6.79ms, med:    12.20ms, mean:    12.24ms, max:   20.94ms, stddev:     3.59ms, sum:   1.2sec, count: 100
+all queries             :
+min:     6.79ms, med:    12.20ms, mean:    12.24ms, max:   20.94ms, stddev:     3.59ms, sum:   1.2sec, count: 100
+wall clock time: 0.314590sec
+Saving results json file to var/benchmarks/tsbs/query-influxdb2-lastpoint-scale100.json

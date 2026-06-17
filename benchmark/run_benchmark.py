@@ -1,163 +1,194 @@
 #!/usr/bin/env python3
-"""时序数据库性能对比 Benchmark: InfluxDB v2 vs IoTDB v1.3"""
+"""通用合成数据 Benchmark: InfluxDB 3 vs IoTDB 2.0 vs PostgreSQL vs DolphinDB."""
 
-import time
+import os
 import random
 import subprocess
-import os
-from influxdb_client import InfluxDBClient, WriteOptions, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
-from iotdb.Session import Session as IoTDBSession
+import time
+from collections import defaultdict
 
-# ============ Config ============
-INFLUXDB_URL = "http://localhost:8086"
-INFLUXDB_TOKEN = "dev-token-for-testing"
-INFLUXDB_ORG = "test-org"
-INFLUXDB_BUCKET = "test-bucket"
+try:
+    import psycopg
+except ImportError:
+    psycopg = None
 
-IOTDB_HOST = "localhost"
-IOTDB_PORT = 6667
+try:
+    from iotdb.Session import Session as IoTDBSession
+except ImportError:
+    IoTDBSession = None
 
-NUM_DEVICES = 100       # 设备数
-SENSORS_PER_DEVICE = 10 # 每设备传感器数
-POINTS_PER_SENSOR = 1000  # 每传感器写入点数（小时级，1秒间隔）
-BATCH_SIZE = 5000       # 每批写入点数
+from dolphindb_client import DolphinDBClient, SYNTHETIC_DB, SYNTHETIC_TABLE
+from influxdb3_client import InfluxDB3Client, line_protocol
+
+
+INFLUXDB_DB = "test_bench"
+
+IOTDB_HOST = os.environ.get("IOTDB_HOST", "localhost")
+IOTDB_PORT = int(os.environ.get("IOTDB_PORT", "6667"))
+
+POSTGRES_CONFIG = {
+    "host": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("POSTGRES_PORT", "5432")),
+    "user": os.environ.get("POSTGRES_USER", "postgres"),
+    "password": os.environ.get("POSTGRES_PASSWORD", "root123"),
+    "dbname": os.environ.get("POSTGRES_DB", "droid"),
+}
+
+NUM_DEVICES = int(os.environ.get("BENCH_NUM_DEVICES", "100"))
+SENSORS_PER_DEVICE = int(os.environ.get("BENCH_SENSORS_PER_DEVICE", "10"))
+POINTS_PER_SENSOR = int(os.environ.get("BENCH_POINTS_PER_SENSOR", "1000"))
+BATCH_SIZE = int(os.environ.get("BENCH_BATCH_SIZE", "5000"))
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
-# ============ Data Generation ============
+ALL_TARGETS = ("influx", "iotdb", "postgres", "dolphindb")
+TARGET_LABELS = {
+    "influx": "InfluxDB 3",
+    "iotdb": "IoTDB",
+    "postgres": "PostgreSQL",
+    "dolphindb": "DolphinDB",
+}
+TARGET_ALIASES = {
+    "influx": "influx",
+    "influxdb": "influx",
+    "influxdb3": "influx",
+    "iotdb": "iotdb",
+    "pg": "postgres",
+    "postgres": "postgres",
+    "postgresql": "postgres",
+    "ddb": "dolphindb",
+    "dolphindb": "dolphindb",
+}
+
+
+def selected_targets():
+    raw = os.environ.get("BENCH_TARGETS", "all")
+    targets = []
+    for token in raw.replace(";", ",").split(","):
+        name = token.strip().lower().replace("-", "")
+        if not name:
+            continue
+        if name == "all":
+            return list(ALL_TARGETS)
+        target = TARGET_ALIASES.get(name)
+        if target is None:
+            valid = ", ".join(["all", *TARGET_ALIASES])
+            raise ValueError(f"未知 BENCH_TARGETS={token!r}，可用值: {valid}")
+        if target not in targets:
+            targets.append(target)
+    return targets or list(ALL_TARGETS)
+
+
 def generate_data():
-    """生成模拟时序数据: 所有设备 × 传感器 × 时间点"""
-    base_time = int(time.time()) * 1000  # 毫秒时间戳
+    base_time = int(time.time()) * 1000
     all_points = []
     for device_id in range(NUM_DEVICES):
         for sensor_id in range(SENSORS_PER_DEVICE):
             for t in range(POINTS_PER_SENSOR):
                 ts = base_time - (POINTS_PER_SENSOR - t) * 1000
-                value = round(random.gauss(25.0, 5.0), 2)  # 模拟温度正态分布
+                value = round(random.gauss(25.0, 5.0), 2)
                 all_points.append((device_id, sensor_id, ts, value))
     return all_points
 
-# ============ InfluxDB Tests ============
+
+# ============ InfluxDB ============
 def influxdb_setup():
-    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
-    # Clean up existing data for fresh test
-    delete_api = client.delete_api()
-    try:
-        delete_api.delete(
-            start="1970-01-01T00:00:00Z",
-            stop="2099-12-31T23:59:59Z",
-            predicate='_measurement="sensor_data"',
-            bucket=INFLUXDB_BUCKET,
-            org=INFLUXDB_ORG,
-        )
-    except Exception:
-        pass
+    client = InfluxDB3Client(INFLUXDB_DB)
+    client.recreate_database()
     return client
+
 
 def influxdb_write_test(points):
     client = influxdb_setup()
-    write_api = client.write_api(write_options=WriteOptions(batch_size=BATCH_SIZE))
-    total = len(points)
-    
+
+    def rows():
+        for device_id, sensor_id, ts, value in points:
+            yield line_protocol(
+                "sensor_data",
+                {"device_id": str(device_id), "sensor_id": str(sensor_id)},
+                {"value": value},
+                ts,
+            )
+
     start = time.time()
-    for i, (device_id, sensor_id, ts, value) in enumerate(points):
-        p = Point("sensor_data") \
-            .tag("device_id", str(device_id)) \
-            .tag("sensor_id", str(sensor_id)) \
-            .field("value", value) \
-            .time(ts, write_precision="ms")
-        write_api.write(bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, record=p)
-    write_api.close()
+    client.write_lines(rows(), batch_size=BATCH_SIZE)
     elapsed = time.time() - start
-    throughput = total / elapsed if elapsed > 0 else 0
-    client.close()
-    return {"db": "InfluxDB", "total_points": total, "elapsed_s": round(elapsed, 2), "throughput_ps": round(throughput)}
+    return _write_result(len(points), elapsed)
+
 
 def influxdb_query_tests():
-    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
-    query_api = client.query_api()
-    results = {}
-    
-    # Query 1: 单个传感器最新值（点查询）
-    flux1 = f'''
-    from(bucket:"{INFLUXDB_BUCKET}")
-      |> range(start: -10m)
-      |> filter(fn: (r) => r._measurement == "sensor_data")
-      |> filter(fn: (r) => r.device_id == "0" and r.sensor_id == "0")
-      |> last()
-    '''
-    start = time.time()
-    res = query_api.query(flux1, org=INFLUXDB_ORG)
-    elapsed = time.time() - start
-    results["point_query_ms"] = round(elapsed * 1000, 1)
-    
-    # Query 2: 单个传感器 1 小时范围查询
-    flux2 = f'''
-    from(bucket:"{INFLUXDB_BUCKET}")
-      |> range(start: -1h)
-      |> filter(fn: (r) => r._measurement == "sensor_data")
-      |> filter(fn: (r) => r.device_id == "0" and r.sensor_id == "0")
-    '''
-    start = time.time()
-    res = query_api.query(flux2, org=INFLUXDB_ORG)
-    elapsed = time.time() - start
-    results["range_query_1h_ms"] = round(elapsed * 1000, 1)
-    
-    # Query 3: 所有设备某传感器 1 小时均值聚合
-    flux3 = f'''
-    from(bucket:"{INFLUXDB_BUCKET}")
-      |> range(start: -1h)
-      |> filter(fn: (r) => r._measurement == "sensor_data")
-      |> filter(fn: (r) => r.sensor_id == "0")
-      |> group(columns: ["device_id"])
-      |> mean()
-    '''
-    start = time.time()
-    res = query_api.query(flux3, org=INFLUXDB_ORG)
-    elapsed = time.time() - start
-    results["aggregate_groupby_ms"] = round(elapsed * 1000, 1)
-    
-    # Query 4: 单设备所有传感器 1 小时降采样（1 分钟间隔）
-    flux4 = f'''
-    from(bucket:"{INFLUXDB_BUCKET}")
-      |> range(start: -1h)
-      |> filter(fn: (r) => r._measurement == "sensor_data")
-      |> filter(fn: (r) => r.device_id == "0")
-      |> aggregateWindow(every: 1m, fn: mean)
-    '''
-    start = time.time()
-    res = query_api.query(flux4, org=INFLUXDB_ORG)
-    elapsed = time.time() - start
-    results["downsample_1m_ms"] = round(elapsed * 1000, 1)
-    
-    client.close()
-    return results
+    client = InfluxDB3Client(INFLUXDB_DB)
+    return {
+        "point_query_ms": _timed_ms(
+            lambda: client.query_sql(
+                """
+                SELECT time, value
+                FROM sensor_data
+                WHERE device_id = '0' AND sensor_id = '0'
+                ORDER BY time DESC
+                LIMIT 1
+                """
+            )
+        ),
+        "range_query_1h_ms": _timed_ms(
+            lambda: client.query_sql(
+                """
+                SELECT time, value
+                FROM sensor_data
+                WHERE device_id = '0'
+                  AND sensor_id = '0'
+                  AND time >= now() - INTERVAL '1 hour'
+                """
+            )
+        ),
+        "aggregate_groupby_ms": _timed_ms(
+            lambda: client.query_sql(
+                """
+                SELECT device_id, AVG(value) AS mean_value
+                FROM sensor_data
+                WHERE sensor_id = '0'
+                  AND time >= now() - INTERVAL '1 hour'
+                GROUP BY device_id
+                """
+            )
+        ),
+        "downsample_1m_ms": _timed_ms(
+            lambda: client.query_sql(
+                """
+                SELECT DATE_BIN(INTERVAL '1 minute', time) AS bucket, sensor_id, AVG(value) AS mean_value
+                FROM sensor_data
+                WHERE device_id = '0'
+                  AND time >= now() - INTERVAL '1 hour'
+                GROUP BY 1, sensor_id
+                ORDER BY 1, sensor_id
+                """
+            )
+        ),
+    }
 
-# ============ IoTDB Tests ============
+
+# ============ IoTDB ============
 def iotdb_setup():
+    if IoTDBSession is None:
+        raise RuntimeError("缺少 apache-iotdb，请先安装：pip install apache-iotdb")
     session = IoTDBSession(host=IOTDB_HOST, port=IOTDB_PORT, fetch_size=10000)
-    session.open(False)  # False = enable redirection
+    session.open(False)
     try:
-        session.execute_non_query_statement("DELETE STORAGE GROUP root.*")
+        session.execute_non_query_statement("DELETE DATABASE root.test_bench")
     except Exception:
         pass
     session.execute_non_query_statement("CREATE DATABASE root.test_bench")
     return session
 
+
 def iotdb_write_test(points):
     session = iotdb_setup()
-    # Create timeseries
-    device_ids = set(item[0] for item in points)
-    sensor_ids = set(item[1] for item in points)
-    for d in sorted(device_ids):
-        for s in sorted(sensor_ids):
+    for d in range(NUM_DEVICES):
+        for s in range(SENSORS_PER_DEVICE):
             session.execute_non_query_statement(
                 f"CREATE TIMESERIES root.test_bench.d{d}.s{s} WITH DATATYPE=FLOAT, ENCODING=GORILLA"
             )
-    
-    # Insert data using insert_record batch
-    total = len(points)
+
     start = time.time()
     batch = []
     for device_id, sensor_id, ts, value in points:
@@ -167,23 +198,20 @@ def iotdb_write_test(points):
             batch = []
     if batch:
         _iotdb_batch_insert(session, batch)
-    
+
     elapsed = time.time() - start
-    throughput = total / elapsed if elapsed > 0 else 0
     session.close()
-    return {"db": "IoTDB", "total_points": total, "elapsed_s": round(elapsed, 2), "throughput_ps": round(throughput)}
+    return _write_result(len(points), elapsed)
+
 
 def _iotdb_batch_insert(session, batch):
-    """Batch insert via insert_records"""
-    # Group by device_id
-    from collections import defaultdict
     groups = defaultdict(list)
     for device_id, sensor_id, ts, value in batch:
         groups[device_id].append((sensor_id, ts, value))
-    
+
     for device_id, records in groups.items():
-        timestamps = [r[1] // 1000 for r in records]
-        measurements_list = [[str(r[0])] for r in records]
+        timestamps = [r[1] for r in records]
+        measurements_list = [[f"s{r[0]}"] for r in records]
         types_list = [["FLOAT"] for _ in records]
         values_list = [[str(r[2])] for r in records]
         try:
@@ -192,120 +220,331 @@ def _iotdb_batch_insert(session, batch):
                 timestamps,
                 measurements_list,
                 types_list,
-                values_list
+                values_list,
             )
-        except Exception as e:
-            # Fallback to single insert if batch fails
+        except Exception:
             for sensor_id, ts, value in records:
                 session.execute_non_query_statement(
-                    f"INSERT INTO root.test_bench.d{device_id}(timestamp, s{sensor_id}) VALUES ({ts // 1000}, {value})"
+                    f"INSERT INTO root.test_bench.d{device_id}(timestamp, s{sensor_id}) VALUES ({ts}, {value})"
                 )
 
+
 def iotdb_query_tests():
+    if IoTDBSession is None:
+        raise RuntimeError("缺少 apache-iotdb，请先安装：pip install apache-iotdb")
     session = IoTDBSession(host=IOTDB_HOST, port=IOTDB_PORT, fetch_size=10000)
     session.open(False)
-    results = {}
-    
-    # Query 1: 单个传感器最新值
-    sql1 = "SELECT last_value(*) FROM root.test_bench.d0.s0"
+    try:
+        return {
+            "point_query_ms": _timed_ms(
+                lambda: session.execute_query_statement("SELECT last_value(*) FROM root.test_bench.d0.s0")
+            ),
+            "range_query_1h_ms": _timed_ms(
+                lambda: session.execute_query_statement(
+                    "SELECT * FROM root.test_bench.d0.s0 ORDER BY TIME DESC LIMIT 3600"
+                )
+            ),
+            "aggregate_groupby_ms": _timed_ms(
+                lambda: session.execute_query_statement("SELECT COUNT(*) FROM root.test_bench.*.*")
+            ),
+            "downsample_1m_ms": _timed_ms(
+                lambda: session.execute_query_statement(
+                    "SELECT AVG(s0), AVG(s1), AVG(s2), AVG(s3), AVG(s4) FROM root.test_bench.d0.*"
+                )
+            ),
+        }
+    finally:
+        session.close()
+
+
+# ============ PostgreSQL ============
+def postgres_setup():
+    if psycopg is None:
+        raise RuntimeError('缺少 psycopg，请先安装：pip install "psycopg[binary]"')
+    conn = psycopg.connect(**POSTGRES_CONFIG)
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS synthetic_sensor_data")
+        cur.execute(
+            """
+            CREATE TABLE synthetic_sensor_data (
+                device_id INTEGER NOT NULL,
+                sensor_id INTEGER NOT NULL,
+                ts BIGINT NOT NULL,
+                value DOUBLE PRECISION NOT NULL,
+                PRIMARY KEY (device_id, sensor_id, ts)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX idx_synthetic_sensor ON synthetic_sensor_data (sensor_id, device_id)")
+        cur.execute("CREATE INDEX idx_synthetic_ts ON synthetic_sensor_data (ts)")
+    conn.commit()
+    return conn
+
+
+def postgres_write_test(points):
+    conn = postgres_setup()
     start = time.time()
-    session.execute_query_statement(sql1)
+    with conn.cursor() as cur:
+        for i in range(0, len(points), BATCH_SIZE):
+            cur.executemany("INSERT INTO synthetic_sensor_data VALUES (%s,%s,%s,%s)", points[i : i + BATCH_SIZE])
+            conn.commit()
     elapsed = time.time() - start
-    results["point_query_ms"] = round(elapsed * 1000, 1)
-    
-    # Query 2: 单个传感器 1 小时范围查询
-    sql2 = "SELECT * FROM root.test_bench.d0.s0 ORDER BY TIME DESC LIMIT 3600"
-    start = time.time()
-    session.execute_query_statement(sql2)
-    elapsed = time.time() - start
-    results["range_query_1h_ms"] = round(elapsed * 1000, 1)
-    
-    # Query 3: 所有设备所有传感器 COUNT 聚合
-    sql3 = "SELECT COUNT(*) FROM root.test_bench.*.*"
-    start = time.time()
-    session.execute_query_statement(sql3)
-    elapsed = time.time() - start
-    results["aggregate_groupby_ms"] = round(elapsed * 1000, 1)
-    
-    # Query 4: 单设备所有传感器 1 小时范围 AVG 聚合
-    sql4 = "SELECT AVG(s0), AVG(s1), AVG(s2), AVG(s3), AVG(s4) FROM root.test_bench.d0.*"
-    start = time.time()
-    session.execute_query_statement(sql4)
-    elapsed = time.time() - start
-    results["downsample_1m_ms"] = round(elapsed * 1000, 1)
-    
-    session.close()
+    conn.close()
+    return _write_result(len(points), elapsed)
+
+
+def postgres_query_tests():
+    conn = psycopg.connect(**POSTGRES_CONFIG)
+    with conn.cursor() as cur:
+        results = {
+            "point_query_ms": _timed_ms(
+                lambda: cur.execute(
+                    """
+                    SELECT ts, value
+                    FROM synthetic_sensor_data
+                    WHERE device_id = 0 AND sensor_id = 0
+                    ORDER BY ts DESC
+                    LIMIT 1
+                    """
+                ).fetchall()
+            ),
+            "range_query_1h_ms": _timed_ms(
+                lambda: cur.execute(
+                    """
+                    SELECT ts, value
+                    FROM synthetic_sensor_data
+                    WHERE device_id = 0 AND sensor_id = 0
+                    ORDER BY ts DESC
+                    LIMIT 3600
+                    """
+                ).fetchall()
+            ),
+            "aggregate_groupby_ms": _timed_ms(
+                lambda: cur.execute(
+                    """
+                    SELECT device_id, AVG(value)
+                    FROM synthetic_sensor_data
+                    WHERE sensor_id = 0
+                    GROUP BY device_id
+                    """
+                ).fetchall()
+            ),
+            "downsample_1m_ms": _timed_ms(
+                lambda: cur.execute(
+                    """
+                    SELECT FLOOR(ts / 60000.0), sensor_id, AVG(value)
+                    FROM synthetic_sensor_data
+                    WHERE device_id = 0
+                    GROUP BY 1, sensor_id
+                    ORDER BY 1, sensor_id
+                    """
+                ).fetchall()
+            ),
+        }
+    conn.close()
     return results
 
-# ============ Disk Usage ============
+
+# ============ DolphinDB ============
+def dolphindb_write_test(points):
+    client = DolphinDBClient()
+    try:
+        client.recreate_synthetic_table()
+        start = time.time()
+        total = client.append_rows(
+            SYNTHETIC_DB,
+            SYNTHETIC_TABLE,
+            ["device_id", "sensor_id", "ts", "value"],
+            points,
+            batch_size=BATCH_SIZE,
+        )
+        elapsed = time.time() - start
+        return _write_result(total, elapsed)
+    finally:
+        client.close()
+
+
+def dolphindb_query_tests():
+    client = DolphinDBClient()
+    try:
+        table = f't = loadTable("{SYNTHETIC_DB}", "{SYNTHETIC_TABLE}")\n'
+        return {
+            "point_query_ms": _timed_ms(
+                lambda: client.run(
+                    table
+                    + """
+                    select ts, value from t
+                    where device_id = 0 and sensor_id = 0
+                    order by ts desc
+                    limit 1
+                    """
+                )
+            ),
+            "range_query_1h_ms": _timed_ms(
+                lambda: client.run(
+                    table
+                    + """
+                    select ts, value from t
+                    where device_id = 0 and sensor_id = 0
+                    order by ts desc
+                    limit 3600
+                    """
+                )
+            ),
+            "aggregate_groupby_ms": _timed_ms(
+                lambda: client.run(
+                    table
+                    + """
+                    select avg(value) as mean_value from t
+                    where sensor_id = 0
+                    group by device_id
+                    """
+                )
+            ),
+            "downsample_1m_ms": _timed_ms(
+                lambda: client.run(
+                    table
+                    + """
+                    select avg(value) as mean_value from t
+                    where device_id = 0
+                    group by floor(ts / 60000), sensor_id
+                    """
+                )
+            ),
+        }
+    finally:
+        client.close()
+
+
+# ============ Helpers ============
+def _timed_ms(fn):
+    start = time.time()
+    fn()
+    return round((time.time() - start) * 1000, 1)
+
+
+def _write_result(total, elapsed):
+    return {
+        "total_points": total,
+        "elapsed_s": round(elapsed, 2),
+        "throughput_ps": round(total / elapsed) if elapsed > 0 else 0,
+    }
+
+
 def get_disk_usage(path):
     try:
-        result = subprocess.run(
-            ["du", "-sh", path],
-            capture_output=True, text=True
-        )
-        return result.stdout.split()[0] if result.returncode == 0 else "N/A"
+        result = subprocess.run(["du", "-sh", path], capture_output=True, text=True, check=False)
+        return result.stdout.split()[0] if result.returncode == 0 and result.stdout else "N/A"
     except Exception:
         return "N/A"
 
-# ============ Main ============
+
+def get_container_disk_usage(container, path):
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container, "du", "-sh", path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.stdout.split()[0] if result.returncode == 0 and result.stdout else "N/A"
+    except Exception:
+        return "N/A"
+
+
+def _fmt(value):
+    if isinstance(value, float):
+        return f"{value:.1f}"
+    if isinstance(value, int):
+        return f"{value:,}"
+    return str(value)
+
+
+def _row(name, values):
+    print(f"{name:<25}" + "".join(f"{_fmt(v):>15}" for v in values))
+
+
 def main():
-    print("=" * 60)
-    print("  时序数据库性能对比 Benchmark")
+    targets = selected_targets()
+    print("=" * 80)
+    print("  通用合成数据 Benchmark")
     print(f"  配置: {NUM_DEVICES} 设备 × {SENSORS_PER_DEVICE} 传感器 × {POINTS_PER_SENSOR} 点")
     print(f"  总数据点数: {NUM_DEVICES * SENSORS_PER_DEVICE * POINTS_PER_SENSOR:,}")
-    print("=" * 60)
-    
-    # Generate data
-    print("\n[1/5] 生成测试数据...")
+    print(f"  目标库: {', '.join(TARGET_LABELS[t] for t in targets)}")
+    print("=" * 80)
+
+    print("\n[准备] 生成测试数据...")
     points = generate_data()
-    random.shuffle(points)  # 乱序写入模拟真实场景
+    random.shuffle(points)
     print(f"  生成 {len(points):,} 个数据点")
-    
-    # InfluxDB Write
-    print("\n[2/5] InfluxDB 写入测试...")
-    influx_result = influxdb_write_test(points)
-    print(f"  InfluxDB: {influx_result['throughput_ps']:,} points/s, 耗时 {influx_result['elapsed_s']}s")
-    
-    # IoTDB Write
-    print("\n[3/5] IoTDB 写入测试...")
-    iotdb_result = iotdb_write_test(points)
-    print(f"  IoTDB: {iotdb_result['throughput_ps']:,} points/s, 耗时 {iotdb_result['elapsed_s']}s")
-    
-    # Query tests
-    print("\n[4/5] 查询性能测试...")
-    influx_queries = influxdb_query_tests()
-    iotdb_queries = iotdb_query_tests()
-    
-    # Disk usage
-    print("\n[5/5] 磁盘空间占用...")
-    influxdb_disk = get_disk_usage(os.path.join(DATA_DIR, "influxdb"))
-    iotdb_disk = get_disk_usage(os.path.join(DATA_DIR, "iotdb"))
-    print(f"  InfluxDB: {influxdb_disk}")
-    print(f"  IoTDB:    {iotdb_disk}")
-    
-    # Summary
-    print("\n" + "=" * 60)
+
+    write_tests = {
+        "influx": influxdb_write_test,
+        "iotdb": iotdb_write_test,
+        "postgres": postgres_write_test,
+        "dolphindb": dolphindb_write_test,
+    }
+    query_tests = {
+        "influx": influxdb_query_tests,
+        "iotdb": iotdb_query_tests,
+        "postgres": postgres_query_tests,
+        "dolphindb": dolphindb_query_tests,
+    }
+    disk_tests = {
+        "influx": lambda: get_disk_usage(os.path.join(DATA_DIR, "influxdb3")),
+        "iotdb": lambda: get_disk_usage(os.path.join(DATA_DIR, "iotdb2")),
+        "postgres": lambda: get_disk_usage(os.path.join(DATA_DIR, "postgres")),
+        "dolphindb": lambda: get_container_disk_usage("tsdb-dolphindb", "/data/ddb"),
+    }
+
+    write_results = {}
+    for target in targets:
+        label = TARGET_LABELS[target]
+        print(f"\n[写入] {label}...")
+        write_results[target] = write_tests[target](points)
+        print(
+            f"  {label}: {write_results[target]['throughput_ps']:,} rows/s, "
+            f"耗时 {write_results[target]['elapsed_s']}s"
+        )
+
+    print("\n[查询] 查询性能测试...")
+    query_results = {}
+    for target in targets:
+        label = TARGET_LABELS[target]
+        print(f"  {label}...")
+        query_results[target] = query_tests[target]()
+
+    print("\n[磁盘] 空间占用...")
+    disks = {}
+    for target in targets:
+        disks[target] = disk_tests[target]()
+        print(f"  {TARGET_LABELS[target]}: {disks[target]}")
+
+    print("\n" + "=" * 80)
     print("  测试结果汇总")
-    print("=" * 60)
-    
-    print(f"\n{'指标':<25} {'InfluxDB':>15} {'IoTDB':>15}")
-    print("-" * 55)
-    print(f"{'写入吞吐 (points/s)':<25} {influx_result['throughput_ps']:>15,} {iotdb_result['throughput_ps']:>15,}")
-    print(f"{'写入总耗时 (s)':<25} {influx_result['elapsed_s']:>15} {iotdb_result['elapsed_s']:>15}")
-    
-    query_tests = [
+    print("=" * 80)
+    print(f"\n{'指标':<25}" + "".join(f"{TARGET_LABELS[t]:>15}" for t in targets))
+    print("-" * (25 + 15 * len(targets)))
+    _row(
+        "写入吞吐 (points/s)",
+        [write_results[target]["throughput_ps"] for target in targets],
+    )
+    _row(
+        "写入总耗时 (s)",
+        [write_results[target]["elapsed_s"] for target in targets],
+    )
+
+    for name, key in [
         ("点查询 (ms)", "point_query_ms"),
         ("范围查询 1h (ms)", "range_query_1h_ms"),
         ("全量聚合 (ms)", "aggregate_groupby_ms"),
         ("多传感器AVG (ms)", "downsample_1m_ms"),
-    ]
-    for name, key in query_tests:
-        print(f"{name:<25} {influx_queries[key]:>15} {iotdb_queries[key]:>15}")
-    
-    print(f"{'磁盘占用':<25} {influxdb_disk:>15} {iotdb_disk:>15}")
-    
-    print("\n✅ Benchmark 完成！")
+    ]:
+        _row(name, [query_results[target][key] for target in targets])
+
+    _row("磁盘占用", [disks[target] for target in targets])
+    print("\n✅ Benchmark 完成")
+
 
 if __name__ == "__main__":
     main()

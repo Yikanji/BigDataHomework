@@ -1,0 +1,27 @@
+{
+ "ResultFormatVersion": "0.1",
+ "RunnerConfig": {
+  "db-name": "tsbs_smoke",
+  "batch-size": 100,
+  "workers": 1,
+  "limit": 0,
+  "do-load": true,
+  "do-create-db": true,
+  "do-abort-on-exist": false,
+  "reporting-period": 10000000000,
+  "hash-workers": false,
+  "no-flow-control": false,
+  "channel-capacity": 0,
+  "insert-intervals": "",
+  "results-file": "var/benchmarks/tsbs/load-postgres-smoke.json",
+  "file": "var/benchmarks/tsbs/timescaledb-cpu-smoke.data",
+  "seed": 0
+ },
+ "StartTime": 1781636860,
+ "EndTime": 1781636860,
+ "DurationMillis": 13,
+ "Totals": {
+  "metricRate": 17279.29320779063,
+  "rowRate": 1727.929320779063
+ }
+}

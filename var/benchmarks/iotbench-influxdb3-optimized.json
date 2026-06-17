@@ -1,0 +1,30 @@
+{
+  "benchmark": "IoTDB Bench equivalent for InfluxDB3",
+  "database": "InfluxDB 3 Core",
+  "db": "iotbench_influx3_equiv_opt",
+  "devices": 20,
+  "sensors": 5,
+  "rows_per_loop": 10,
+  "loops": 50,
+  "batch_size": 20000,
+  "workers": 1,
+  "line_count": 10000,
+  "point_count": 50000,
+  "elapsed_s": 0.18956971168518066,
+  "throughput_points_s": 263755.2146676007,
+  "throughput_lines_s": 52751.04293352014,
+  "count_query_ms": 3.6115646362304688,
+  "count_result": [
+    {
+      "rows": 10000
+    }
+  ],
+  "queries": {
+    "latest_ms": 3.999,
+    "latest_ms_rows": 1,
+    "range_ms": 2.953,
+    "range_ms_rows": 500,
+    "aggregate_ms": 5.121,
+    "aggregate_ms_rows": 20
+  }
+}

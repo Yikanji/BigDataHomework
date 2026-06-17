@@ -1,0 +1,66 @@
+Script started on 2026-06-17 09:04:39+08:00 [COMMAND="env NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1 DROID_PATH=var/droid/1.0.0 DROID_MAX_EPISODES=60 DROID_TF_SHARD_COUNT=2 BENCH_TARGETS=all BENCH_BATCH_SIZE=10000 /home/yikanji/miniconda3/envs/tfrecord_env/bin/python benchmark/droid_scenario.py" <not executed on terminal>]
+========================================================================================
+  DROID 场景化 Benchmark
+  轨迹: ≤60 条, 分片: 2, ~15Hz
+  目标库: InfluxDB 3, IoTDB, PostgreSQL, MySQL, DolphinDB
+========================================================================================
+
+[准备] 加载 DROID...
+  60 条轨迹, 17979 步, 377,559 数据点
+
+[写入] InfluxDB 3...
+  377,559 点, 47,457 pts/s, 耗时 8.0s
+
+[写入] IoTDB...
+  377,559 点, 115,009 pts/s, 耗时 3.3s
+
+[写入] PostgreSQL...
+  377,559 行, 99,934 rows/s, 耗时 3.8s
+
+[写入] MySQL...
+  377,559 行, 62,664 rows/s, 耗时 6.0s
+
+[写入] DolphinDB...
+  377,559 行, 376,019 rows/s, 耗时 1.0s
+
+[场景] 场景测试
+
+-------------------------
+
+[场景1] 降采样: 原始 -> 1s 窗口均值 (ep0, jpos_d0)
+  InfluxDB 3 7.3 ms | IoTDB 4.2 ms | PostgreSQL 2.1 ms | MySQL 0.7 ms | DolphinDB 0.9 ms
+
+[场景2] 插值: 删除 ep0/jpos_d0 中间 50 点后线性补全
+  InfluxDB 3 18.1 ms | IoTDB 2.6 ms | PostgreSQL 4.0 ms | MySQL 6.1 ms | DolphinDB 1.2 ms
+
+[场景3] 滑动窗口: 1s 窗口 STDDEV 检测关节抖动 (ep0, jvel_d0)
+  InfluxDB 3 5.8 ms | IoTDB 4.1 ms | PostgreSQL 0.6 ms | MySQL 0.9 ms | DolphinDB 0.8 ms
+
+[场景4] 跨轨迹聚合: 60 条轨迹关节位置全局 AVG + STDDEV
+  InfluxDB 3 7.9 ms | IoTDB 4.4 ms | PostgreSQL 12.9 ms | MySQL 135.6 ms | DolphinDB 3.3 ms
+
+[磁盘] 磁盘占用
+  InfluxDB 3: 38M
+  IoTDB: 19M
+  PostgreSQL: 268M
+  MySQL: 337M
+  DolphinDB: 447.3M
+
+[汇总]
+
+========================================================================================
+  四库对照结果
+========================================================================================
+
+场景                                  InfluxDB 3         IoTDB    PostgreSQL         MySQL     DolphinDB
+------------------------------------------------------------------------------------------------------
+写入吞吐 (pts/s)                           47457.3      115008.8       99934.3       62663.5      376018.9
+降采样 (ms)                                   7.3           4.2           2.1           0.7           0.9
+插值填充 (ms)                                 18.1           2.6           4.0           6.1           1.2
+滑动窗口抖动检测 (ms)                              5.8           4.1           0.6           0.9           0.8
+跨轨迹聚合 (ms)                                 7.9           4.4          12.9         135.6           3.3
+磁盘占用                                       38M           19M          268M          337M        447.3M
+
+✅ 完成
+
+Script done on 2026-06-17 09:05:06+08:00 [COMMAND_EXIT_CODE="0"]
